@@ -34,7 +34,7 @@ function FooterMenu({menu}) {
             style={activeLinkStyle}
             to={url}
           >
-            {item.title}
+            ➡️ {item.title}
           </NavLink>
         );
       })}
