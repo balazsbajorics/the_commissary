@@ -1,17 +1,58 @@
 // Virtual entry point for the app
-import * as remixBuild from '@remix-run/dev/server-build';
+import * as remixBuild from '@remix-run/dev/server-build'
 import {
   cartGetIdDefault,
   cartSetIdDefault,
   createCartHandler,
   createStorefrontClient,
   storefrontRedirect,
-} from '@shopify/hydrogen';
+} from '@shopify/hydrogen'
 import {
   createRequestHandler,
   getStorefrontHeaders,
   createCookieSessionStorage,
-} from '@shopify/remix-oxygen';
+} from '@shopify/remix-oxygen'
+
+/** The getLoadContext is used both here in server.js, and by Utopia's storyboard.js */
+export const getLoadContext = (
+  env,
+  executionContext,
+) => async (request) => {
+  const waitUntil = executionContext.waitUntil.bind(
+    executionContext,
+  )
+  const [cache, session] = await Promise.all([
+    caches.open('hydrogen'),
+    HydrogenSession.init(request, [env.SESSION_SECRET]),
+  ])
+
+  /**
+   * Create Hydrogen's Storefront client.
+   */
+  const { storefront } = createStorefrontClient({
+    cache,
+    waitUntil,
+    i18n: getLocaleFromRequest(request),
+    publicStorefrontToken: env.PUBLIC_STOREFRONT_API_TOKEN,
+    privateStorefrontToken:
+      env.PRIVATE_STOREFRONT_API_TOKEN,
+    storeDomain: env.PUBLIC_STORE_DOMAIN,
+    storefrontId: env.PUBLIC_STOREFRONT_ID,
+    storefrontHeaders: getStorefrontHeaders(request),
+  })
+
+  /*
+   * Create a cart handler that will be used to
+   * create and update the cart in the session.
+   */
+  const cart = createCartHandler({
+    storefront,
+    getCartId: cartGetIdDefault(request.headers),
+    setCartId: cartSetIdDefault(),
+    cartQueryFragment: CART_QUERY_FRAGMENT,
+  })
+  return { session, storefront, cart, env, waitUntil }
+}
 
 /**
  * Export a fetch handler in module format.
@@ -23,39 +64,10 @@ export default {
        * Open a cache instance in the worker and a custom session instance.
        */
       if (!env?.SESSION_SECRET) {
-        throw new Error('SESSION_SECRET environment variable is not set');
+        throw new Error(
+          'SESSION_SECRET environment variable is not set',
+        )
       }
-
-      const waitUntil = executionContext.waitUntil.bind(executionContext);
-      const [cache, session] = await Promise.all([
-        caches.open('hydrogen'),
-        HydrogenSession.init(request, [env.SESSION_SECRET]),
-      ]);
-
-      /**
-       * Create Hydrogen's Storefront client.
-       */
-      const {storefront} = createStorefrontClient({
-        cache,
-        waitUntil,
-        i18n: getLocaleFromRequest(request),
-        publicStorefrontToken: env.PUBLIC_STOREFRONT_API_TOKEN,
-        privateStorefrontToken: env.PRIVATE_STOREFRONT_API_TOKEN,
-        storeDomain: env.PUBLIC_STORE_DOMAIN,
-        storefrontId: env.PUBLIC_STOREFRONT_ID,
-        storefrontHeaders: getStorefrontHeaders(request),
-      });
-
-      /*
-       * Create a cart handler that will be used to
-       * create and update the cart in the session.
-       */
-      const cart = createCartHandler({
-        storefront,
-        getCartId: cartGetIdDefault(request.headers),
-        setCartId: cartSetIdDefault(),
-        cartQueryFragment: CART_QUERY_FRAGMENT,
-      });
 
       /**
        * Create a Remix request handler and pass
@@ -64,10 +76,13 @@ export default {
       const handleRequest = createRequestHandler({
         build: remixBuild,
         mode: process.env.NODE_ENV,
-        getLoadContext: () => ({session, storefront, cart, env, waitUntil}),
-      });
+        getLoadContext: getLoadContext(
+          env,
+          executionContext,
+        ),
+      })
 
-      const response = await handleRequest(request);
+      const response = await handleRequest(request)
 
       if (response.status === 404) {
         /**
@@ -75,17 +90,23 @@ export default {
          * If the redirect doesn't exist, then `storefrontRedirect`
          * will pass through the 404 response.
          */
-        return storefrontRedirect({request, response, storefront});
+        return storefrontRedirect({
+          request,
+          response,
+          storefront,
+        })
       }
 
-      return response;
+      return response
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error(error);
-      return new Response('An unexpected error occurred', {status: 500});
+      console.error(error)
+      return new Response('An unexpected error occurred', {
+        status: 500,
+      })
     }
   },
-};
+}
 
 /**
  * This is a custom session implementation for your Hydrogen shop.
@@ -93,12 +114,12 @@ export default {
  * swap out the cookie-based implementation with something else!
  */
 export class HydrogenSession {
-  #sessionStorage;
-  #session;
+  #sessionStorage
+  #session
 
   constructor(sessionStorage, session) {
-    this.#sessionStorage = sessionStorage;
-    this.#session = session;
+    this.#sessionStorage = sessionStorage
+    this.#session = session
   }
 
   static async init(request, secrets) {
@@ -110,39 +131,43 @@ export class HydrogenSession {
         sameSite: 'lax',
         secrets,
       },
-    });
+    })
 
-    const session = await storage.getSession(request.headers.get('Cookie'));
+    const session = await storage.getSession(
+      request.headers.get('Cookie'),
+    )
 
-    return new this(storage, session);
+    return new this(storage, session)
   }
 
   get has() {
-    return this.#session.has;
+    return this.#session.has
   }
 
   get get() {
-    return this.#session.get;
+    return this.#session.get
   }
 
   get flash() {
-    return this.#session.flash;
+    return this.#session.flash
   }
 
   get unset() {
-    return this.#session.unset;
+    return this.#session.unset
   }
 
   get set() {
-    return this.#session.set;
+    return this.#session.set
   }
 
   destroy() {
-    return this.#sessionStorage.destroySession(this.#session);
+    return this.#sessionStorage.destroySession(
+      this.#session,
+    )
   }
 
   commit() {
-    return this.#sessionStorage.commitSession(this.#session);
+    return this.#sessionStorage.commitSession(this.#session)
   }
 }
 
@@ -247,17 +272,18 @@ const CART_QUERY_FRAGMENT = `#graphql
       applicable
     }
   }
-`;
+`
 
 function getLocaleFromRequest(request) {
-  const url = new URL(request.url);
-  const firstPathPart = url.pathname.split('/')[1]?.toUpperCase() ?? '';
-  let pathPrefix = '';
-  let language = 'EN';
-  let country = 'US';
+  const url = new URL(request.url)
+  const firstPathPart =
+    url.pathname.split('/')[1]?.toUpperCase() ?? ''
+  let pathPrefix = ''
+  let language = 'EN'
+  let country = 'US'
   if (/^[A-Z]{2}-[A-Z]{2}$/i.test(firstPathPart)) {
-    pathPrefix = '/' + firstPathPart;
-    [language, country] = firstPathPart.split('-');
+    pathPrefix = '/' + firstPathPart
+    ;[language, country] = firstPathPart.split('-')
   }
-  return {language, country, pathPrefix};
+  return { language, country, pathPrefix }
 }
